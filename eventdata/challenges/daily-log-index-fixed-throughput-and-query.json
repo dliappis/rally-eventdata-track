@@ -1,0 +1,126 @@
+{% set p_bulk_indexing_clients = (bulk_indexing_clients | default(8)) %}
+{% set p_bulk_size = (bulk_size | default(1000)) %}
+{% set p_bulk_indexing_reqs_per_sec = (bulk_indexing_reqs_per_sec | default(20)) %}
+{% set p_search_clients = (search_clients | default(1)) %}
+{% set p_starting_point = (starting_point | default("2018-05-25 00:00:00")) %}
+{% set p_number_of_days = (number_of_days | default(6)) %}
+{% set p_daily_logging_volume = (daily_logging_volume | default("100GB")) %}
+
+{#
+  This challenge assumes that `index-logs-fixed-daily-volume` has been executed before.
+#}
+
+{
+  "name": "index-fixed-load-and-query",
+  "description": "Indexes {{ p_number_of_days }} days of logs (each {{ p_daily_logging_volume }} size) running at {{ p_bulk_indexing_reqs_per_sec }} reqs/s while running queries concurrently",
+  "meta": {
+    "client_count": {{ p_bulk_indexing_clients }},
+    "benchmark_type": "logs-fixed-index-daily-throughput-and-query"
+  },
+  "schedule": [
+    {
+      "operation": {
+        "operation-type": "fieldstats",
+        "index_pattern": "elasticlogs-*"
+      },
+      "iterations": 1,
+      {# this needs to be available for all clients, and we issue three concurrent queries #}
+      "clients": {{ p_bulk_indexing_clients + (3 * p_search_clients) }}
+    },
+    {
+      "parallel": {
+        "completed-by": "index-fixed-throughput",
+        {# We are assuming that indexing one day of logs takes longer than the warmup-time-period #}
+        "warmup-time-period": 600,
+        "tasks": [
+          {
+            "operation": {
+              "name": "index-fixed-throughput",
+              "operation-type": "bulk",
+              "param-source": "elasticlogs_bulk",
+              "index": "elasticlogs-<yyyy>-<mm>-<dd>",
+              "starting_point": "{{ p_starting_point }}",
+              "offset": "+1d",
+              "bulk-size": {{ p_bulk_size }},
+              "daily_logging_volume": "{{ p_daily_logging_volume }}",
+              "number_of_days": {{ p_number_of_days }}
+            },
+            "target-throughput": {{ p_bulk_indexing_reqs_per_sec }},
+            "clients": {{ p_bulk_indexing_clients }},
+            "meta": {
+              "target_indexing_throughput": "{{ p_bulk_indexing_reqs_per_sec * p_bulk_size }}",
+              "target_indexing_throughput_unit": "docs/s"
+            }
+          },
+          {
+            "name": "traffic-dashboard-25%",
+            "operation": {
+              "operation-type": "kibana",
+              "param-source": "elasticlogs_kibana",
+              "debug": {{ p_verbose }},
+              "dashboard": "traffic",
+              "index_pattern": "elasticlogs-*",
+              "query_string": "query_string_lists/country_code_query_strings.json",
+              "window_end": "END",
+              "window_length": "25%"
+            },
+            "clients": {{ p_search_clients }},
+            "target-interval": {{ query1_target_interval | default(90) | int }},
+            "meta": {
+              "querying": "yes",
+              "query_type": "relative",
+              "dashboard": "traffic",
+              "window_length": "25%"
+            },
+            "schedule": "poisson"
+          },
+          {
+            "name": "discover-30m",
+            "operation": {
+              "operation-type": "kibana",
+              "param-source": "elasticlogs_kibana",
+              "debug": {{ p_verbose }},
+              "dashboard": "discover",
+              "index_pattern": "elasticlogs-*",
+              "query_string": ["*"],
+              "window_end": "END",
+              "window_length": "30m"
+            },
+            "clients": {{ p_search_clients }},
+            "target-interval": {{ query2_target_interval | default(30) | int }},
+            "meta": {
+              "querying": "yes",
+              "query_type": "relative",
+              "dashboard": "discover",
+              "window_length": "30m"
+            },
+            "schedule": "poisson"
+          },
+          {
+            "name": "content_issues-dashboard-25%",
+            "#COMMENT": "Looks only for 404s about 1-1.5% of data",
+            "operation": {
+              "operation-type": "kibana",
+              "param-source": "elasticlogs_kibana",
+              "debug": {{ p_verbose }},
+              "dashboard": "content_issues",
+              "index_pattern": "elasticlogs-*",
+              "query_string": ["*"],
+              "window_end": "END",
+              "window_length": "25%"
+            },
+            "clients": {{ p_search_clients }},
+            "target-interval": {{ query3_target_interval | default(45) | int }},
+            "meta": {
+              "querying": "yes",
+              "query_type": "relative",
+              "dashboard": "content_issues",
+              "window_length": "25%"
+            },
+            "schedule": "poisson"
+          }
+        ]
+      }
+    }
+  ]
+}

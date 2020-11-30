@@ -55,11 +55,11 @@ check-venv:
 	fi
 
 install: venv-create
-	. $(VENV_ACTIVATE_FILE); pip install --upgrade pip
+	. $(VENV_ACTIVATE_FILE); python3 -mpip install --upgrade pip
 	# install pytest for tests
-	. $(VENV_ACTIVATE_FILE); pip3 install pytest==5.1.1
+	. $(VENV_ACTIVATE_FILE); python3 -mpip install pytest==5.1.1 --use-feature=2020-resolver
 	# install (latest) Rally for smoke tests
-	. $(VENV_ACTIVATE_FILE); pip3 install git+ssh://git@github.com/elastic/rally.git
+	. $(VENV_ACTIVATE_FILE); python3 -mpip install git+ssh://git@github.com/elastic/rally.git --use-feature=2020-resolver
 
 clean:
 	rm -rf .pytest_cache
